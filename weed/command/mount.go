@@ -56,20 +56,28 @@ var cmdMount = &Command{
 }
 
 func parseFilerGrpcAddress(filer string, optionalGrpcPort int) (filerGrpcAddress string, err error) {
-	hostnameAndPort := strings.Split(filer, ":")
-	if len(hostnameAndPort) != 2 {
-		return "", fmt.Errorf("The filer should have hostname:port format: %v", hostnameAndPort)
-	}
-
-	filerPort, parseErr := strconv.ParseUint(hostnameAndPort[1], 10, 64)
-	if parseErr != nil {
-		return "", fmt.Errorf("The filer filer port parse error: %v", parseErr)
-	}
-
-	filerGrpcPort := int(filerPort) + 10000
+//default value 
+	var filerGrpcPort int64
+	var filerGrpcHost string
+// if set the filer.grpc.port ,we will not split the port from the filer option
 	if optionalGrpcPort != 0 {
 		filerGrpcPort = optionalGrpcPort
+		filerGrpcHost=filer
+	}
+	else{
+		hostnameAndPort := strings.Split(filer, ":")
+		if len(hostnameAndPort) != 2 {
+			return "", fmt.Errorf("The filer should have hostname:port format: %v when not specified the filer.grpc.port ", hostnameAndPort)
+		}
+
+		filerPort, parseErr := strconv.ParseUint(hostnameAndPort[1], 10, 64)
+		if parseErr != nil {
+			return "", fmt.Errorf("The filer filer port parse error: %v", parseErr)
+		}
+
+		filerGrpcPort := int(filerPort) + 10000
+		filerGrpcHost=hostnameAndPort[0]
 	}
 
-	return fmt.Sprintf("%s:%d", hostnameAndPort[0], filerGrpcPort), nil
+	return fmt.Sprintf("%s:%d", filerGrpcHost, filerGrpcPort), nil
 }
