@@ -34,10 +34,10 @@ func runMount(cmd *Command, args []string) bool {
 		fuse.NoAppleDouble(),
 		fuse.NoAppleXattr(),
 		fuse.ExclCreate(),
-		fuse.DaemonTimeout("3600"),
+		fuse.DaemonTimeout("3600"),//超市时间超长
 		fuse.AllowOther(),
 		fuse.AllowSUID(),
-		fuse.DefaultPermissions(),
+		fuse.DefaultPermissions(),//默认是当前用户的permission，会碰到不同用户、不同主机加载，权限不一致的情况
 		// fuse.MaxReadahead(1024*128), // TODO: not tested yet, possibly improving read performance
 		fuse.AsyncRead(),
 		fuse.WritebackCache(),
