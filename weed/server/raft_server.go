@@ -127,3 +127,9 @@ func isPeersChanged(dir string, self string, peers []string) (oldPeers []string,
 	return oldPeers, !reflect.DeepEqual(peers, oldPeers)
 
 }
+
+/*
+	目前存在的问题：
+	1.如果本地存在raft 配置信息，然后远程其他master重启的时候，无法快速加入
+	2.如果在启动的时候 没有使用-peers ，那么直接加载原始拓扑，会自动连之前的master，造成困惑。
+*/
