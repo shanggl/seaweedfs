@@ -32,6 +32,9 @@ type FilerOptions struct {
 	dirListingLimit         *int
 	dataCenter              *string
 	enableNotification      *bool
+
+	// default leveldb directory, used in "weed server" mode
+	defaultLevelDbDirectory *string
 }
 
 func init() {
@@ -47,7 +50,7 @@ func init() {
 	f.disableDirListing = cmdFiler.Flag.Bool("disableDirListing", false, "turn off directory listing")
 	f.maxMB = cmdFiler.Flag.Int("maxMB", 32, "split files larger than the limit")
 	f.secretKey = cmdFiler.Flag.String("secure.secret", "", "secret to encrypt Json Web Token(JWT)")
-	f.dirListingLimit = cmdFiler.Flag.Int("dirListLimit", 1000, "limit sub dir listing size")
+	f.dirListingLimit = cmdFiler.Flag.Int("dirListLimit", 100000, "limit sub dir listing size")
 	f.dataCenter = cmdFiler.Flag.String("dataCenter", "", "prefer to write to volumes in this data center")
 }
 
@@ -88,6 +91,11 @@ func (fo *FilerOptions) startFiler() {
 		publicVolumeMux = http.NewServeMux()
 	}
 
+	defaultLevelDbDirectory := "./filerdb"
+	if fo.defaultLevelDbDirectory != nil {
+		defaultLevelDbDirectory = *fo.defaultLevelDbDirectory + "/filerdb"
+	}
+
 	fs, nfs_err := weed_server.NewFilerServer(defaultMux, publicVolumeMux, &weed_server.FilerOption{
 		Masters:            strings.Split(*f.masters, ","),
 		Collection:         *fo.collection,
@@ -98,6 +106,7 @@ func (fo *FilerOptions) startFiler() {
 		SecretKey:          *fo.secretKey,
 		DirListingLimit:    *fo.dirListingLimit,
 		DataCenter:         *fo.dataCenter,
+		DefaultLevelDbDir:  defaultLevelDbDirectory,
 	})
 	if nfs_err != nil {
 		glog.Fatalf("Filer startup error: %v", nfs_err)
@@ -117,7 +126,7 @@ func (fo *FilerOptions) startFiler() {
 		}()
 	}
 
-	glog.V(0).Infoln("Start Seaweed Filer", util.VERSION, "at port", strconv.Itoa(*fo.port))
+	glog.V(0).Infof("Start Seaweed Filer %s at %s:%d", util.VERSION, *fo.ip, *fo.port)
 	filerListener, e := util.NewListener(
 		":"+strconv.Itoa(*fo.port),
 		time.Duration(10)*time.Second,

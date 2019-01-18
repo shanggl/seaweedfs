@@ -43,8 +43,13 @@ func (v *Volume) commitCompact() error {
 	v.dataFileAccessLock.Lock()
 	defer v.dataFileAccessLock.Unlock()
 	glog.V(3).Infof("Got volume %d committing lock...", v.Id)
+	v.compactingWg.Add(1)
+	defer v.compactingWg.Done()
 	v.nm.Close()
-	_ = v.dataFile.Close()
+	if err := v.dataFile.Close(); err != nil {
+		glog.V(0).Infof("fail to close volume %d", v.Id)
+	}
+	v.dataFile = nil
 
 	var e error
 	if e = v.makeupDiff(v.FileName()+".cpd", v.FileName()+".cpx", v.FileName()+".dat", v.FileName()+".idx"); e != nil {
@@ -60,10 +65,10 @@ func (v *Volume) commitCompact() error {
 	} else {
 		var e error
 		if e = os.Rename(v.FileName()+".cpd", v.FileName()+".dat"); e != nil {
-			return e
+			return fmt.Errorf("rename %s: %v", v.FileName()+".cpd", e)
 		}
 		if e = os.Rename(v.FileName()+".cpx", v.FileName()+".idx"); e != nil {
-			return e
+			return fmt.Errorf("rename %s: %v", v.FileName()+".cpx", e)
 		}
 	}
 
@@ -132,10 +137,10 @@ func (v *Volume) makeupDiff(newDatFileName, newIdxFileName, oldDatFileName, oldI
 	}
 	incrementedHasUpdatedIndexEntry := make(map[NeedleId]keyField)
 
-	for idx_offset := indexSize - NeedleEntrySize; uint64(idx_offset) >= v.lastCompactIndexOffset; idx_offset -= NeedleEntrySize {
+	for idxOffset := indexSize - NeedleEntrySize; uint64(idxOffset) >= v.lastCompactIndexOffset; idxOffset -= NeedleEntrySize {
 		var IdxEntry []byte
-		if IdxEntry, err = readIndexEntryAtOffset(oldIdxFile, idx_offset); err != nil {
-			return fmt.Errorf("readIndexEntry %s at offset %d failed: %v", oldIdxFileName, idx_offset, err)
+		if IdxEntry, err = readIndexEntryAtOffset(oldIdxFile, idxOffset); err != nil {
+			return fmt.Errorf("readIndexEntry %s at offset %d failed: %v", oldIdxFileName, idxOffset, err)
 		}
 		key, offset, size := IdxFileEntry(IdxEntry)
 		glog.V(4).Infof("key %d offset %d size %d", key, offset, size)
@@ -175,11 +180,11 @@ func (v *Volume) makeupDiff(newDatFileName, newIdxFileName, oldDatFileName, oldI
 		return fmt.Errorf("oldDatFile %s 's compact revision is %d while newDatFile %s 's compact revision is %d", oldDatFileName, oldDatCompactRevision, newDatFileName, newDatCompactRevision)
 	}
 
-	idx_entry_bytes := make([]byte, NeedleIdSize+OffsetSize+SizeSize)
-	for key, incre_idx_entry := range incrementedHasUpdatedIndexEntry {
-		NeedleIdToBytes(idx_entry_bytes[0:NeedleIdSize], key)
-		OffsetToBytes(idx_entry_bytes[NeedleIdSize:NeedleIdSize+OffsetSize], incre_idx_entry.offset)
-		util.Uint32toBytes(idx_entry_bytes[NeedleIdSize+OffsetSize:NeedleIdSize+OffsetSize+SizeSize], incre_idx_entry.size)
+	idxEntryBytes := make([]byte, NeedleIdSize+OffsetSize+SizeSize)
+	for key, increIdxEntry := range incrementedHasUpdatedIndexEntry {
+		NeedleIdToBytes(idxEntryBytes[0:NeedleIdSize], key)
+		OffsetToBytes(idxEntryBytes[NeedleIdSize:NeedleIdSize+OffsetSize], increIdxEntry.offset)
+		util.Uint32toBytes(idxEntryBytes[NeedleIdSize+OffsetSize:NeedleIdSize+OffsetSize+SizeSize], increIdxEntry.size)
 
 		var offset int64
 		if offset, err = dst.Seek(0, 2); err != nil {
@@ -196,36 +201,76 @@ func (v *Volume) makeupDiff(newDatFileName, newIdxFileName, oldDatFileName, oldI
 		}
 
 		//updated needle
-		if incre_idx_entry.offset != 0 && incre_idx_entry.size != 0 && incre_idx_entry.size != TombstoneFileSize {
+		if increIdxEntry.offset != 0 && increIdxEntry.size != 0 && increIdxEntry.size != TombstoneFileSize {
 			//even the needle cache in memory is hit, the need_bytes is correct
-			glog.V(4).Infof("file %d offset %d size %d", key, int64(incre_idx_entry.offset)*NeedlePaddingSize, incre_idx_entry.size)
-			var needle_bytes []byte
-			needle_bytes, err = ReadNeedleBlob(oldDatFile, int64(incre_idx_entry.offset)*NeedlePaddingSize, incre_idx_entry.size, v.Version())
+			glog.V(4).Infof("file %d offset %d size %d", key, int64(increIdxEntry.offset)*NeedlePaddingSize, increIdxEntry.size)
+			var needleBytes []byte
+			needleBytes, err = ReadNeedleBlob(oldDatFile, int64(increIdxEntry.offset)*NeedlePaddingSize, increIdxEntry.size, v.Version())
 			if err != nil {
-				return fmt.Errorf("ReadNeedleBlob %s key %d offset %d size %d failed: %v", oldDatFile.Name(), key, int64(incre_idx_entry.offset)*NeedlePaddingSize, incre_idx_entry.size, err)
+				return fmt.Errorf("ReadNeedleBlob %s key %d offset %d size %d failed: %v", oldDatFile.Name(), key, int64(increIdxEntry.offset)*NeedlePaddingSize, increIdxEntry.size, err)
 			}
-			dst.Write(needle_bytes)
-			util.Uint32toBytes(idx_entry_bytes[8:12], uint32(offset/NeedlePaddingSize))
+			dst.Write(needleBytes)
+			util.Uint32toBytes(idxEntryBytes[8:12], uint32(offset/NeedlePaddingSize))
 		} else { //deleted needle
 			//fakeDelNeedle 's default Data field is nil
 			fakeDelNeedle := new(Needle)
 			fakeDelNeedle.Id = key
 			fakeDelNeedle.Cookie = 0x12345678
 			fakeDelNeedle.AppendAtNs = uint64(time.Now().UnixNano())
-			_, _, err = fakeDelNeedle.Append(dst, v.Version())
+			_, _, _, err = fakeDelNeedle.Append(dst, v.Version())
 			if err != nil {
 				return fmt.Errorf("append deleted %d failed: %v", key, err)
 			}
-			util.Uint32toBytes(idx_entry_bytes[8:12], uint32(0))
+			util.Uint32toBytes(idxEntryBytes[8:12], uint32(0))
 		}
 
 		if _, err := idx.Seek(0, 2); err != nil {
 			return fmt.Errorf("cannot seek end of indexfile %s: %v",
 				newIdxFileName, err)
 		}
-		_, err = idx.Write(idx_entry_bytes)
+		_, err = idx.Write(idxEntryBytes)
 	}
 
+	return nil
+}
+
+type VolumeFileScanner4Vacuum struct {
+	version   Version
+	v         *Volume
+	dst       *os.File
+	nm        *NeedleMap
+	newOffset int64
+	now       uint64
+}
+
+func (scanner *VolumeFileScanner4Vacuum) VisitSuperBlock(superBlock SuperBlock) error {
+	scanner.version = superBlock.Version()
+	superBlock.CompactRevision++
+	_, err := scanner.dst.Write(superBlock.Bytes())
+	scanner.newOffset = int64(superBlock.BlockSize())
+	return err
+
+}
+func (scanner *VolumeFileScanner4Vacuum) ReadNeedleBody() bool {
+	return true
+}
+
+func (scanner *VolumeFileScanner4Vacuum) VisitNeedle(n *Needle, offset int64) error {
+	if n.HasTtl() && scanner.now >= n.LastModified+uint64(scanner.v.Ttl.Minutes()*60) {
+		return nil
+	}
+	nv, ok := scanner.v.nm.Get(n.Id)
+	glog.V(4).Infoln("needle expected offset ", offset, "ok", ok, "nv", nv)
+	if ok && int64(nv.Offset)*NeedlePaddingSize == offset && nv.Size > 0 {
+		if err := scanner.nm.Put(n.Id, Offset(scanner.newOffset/NeedlePaddingSize), n.Size); err != nil {
+			return fmt.Errorf("cannot put needle: %s", err)
+		}
+		if _, _, _, err := n.Append(scanner.dst, scanner.v.Version()); err != nil {
+			return fmt.Errorf("cannot append needle: %s", err)
+		}
+		scanner.newOffset += n.DiskSize(scanner.version)
+		glog.V(4).Infoln("saving key", n.Id, "volume offset", offset, "=>", scanner.newOffset, "data_size", n.Size)
+	}
 	return nil
 }
 
@@ -243,38 +288,13 @@ func (v *Volume) copyDataAndGenerateIndexFile(dstName, idxName string, prealloca
 	}
 	defer idx.Close()
 
-	nm := NewBtreeNeedleMap(idx)
-	new_offset := int64(0)
-
-	now := uint64(time.Now().Unix())
-
-	var version Version
-	err = ScanVolumeFile(v.dir, v.Collection, v.Id, v.needleMapKind,
-		func(superBlock SuperBlock) error {
-			version = superBlock.Version()
-			superBlock.CompactRevision++
-			_, err = dst.Write(superBlock.Bytes())
-			new_offset = int64(superBlock.BlockSize())
-			return err
-		}, true, func(n *Needle, offset int64) error {
-			if n.HasTtl() && now >= n.LastModified+uint64(v.Ttl.Minutes()*60) {
-				return nil
-			}
-			nv, ok := v.nm.Get(n.Id)
-			glog.V(4).Infoln("needle expected offset ", offset, "ok", ok, "nv", nv)
-			if ok && int64(nv.Offset)*NeedlePaddingSize == offset && nv.Size > 0 {
-				if err = nm.Put(n.Id, Offset(new_offset/NeedlePaddingSize), n.Size); err != nil {
-					return fmt.Errorf("cannot put needle: %s", err)
-				}
-				if _, _, err := n.Append(dst, v.Version()); err != nil {
-					return fmt.Errorf("cannot append needle: %s", err)
-				}
-				new_offset += n.DiskSize(version)
-				glog.V(4).Infoln("saving key", n.Id, "volume offset", offset, "=>", new_offset, "data_size", n.Size)
-			}
-			return nil
-		})
-
+	scanner := &VolumeFileScanner4Vacuum{
+		v:   v,
+		now: uint64(time.Now().Unix()),
+		nm:  NewBtreeNeedleMap(idx),
+		dst: dst,
+	}
+	err = ScanVolumeFile(v.dir, v.Collection, v.Id, v.needleMapKind, scanner)
 	return
 }
 
@@ -302,7 +322,7 @@ func (v *Volume) copyDataBasedOnIndexFile(dstName, idxName string) (err error) {
 
 	v.SuperBlock.CompactRevision++
 	dst.Write(v.SuperBlock.Bytes())
-	new_offset := int64(v.SuperBlock.BlockSize())
+	newOffset := int64(v.SuperBlock.BlockSize())
 
 	WalkIndexFile(oldIndexFile, func(key NeedleId, offset Offset, size uint32) error {
 		if offset == 0 || size == TombstoneFileSize {
@@ -323,14 +343,14 @@ func (v *Volume) copyDataBasedOnIndexFile(dstName, idxName string) (err error) {
 
 		glog.V(4).Infoln("needle expected offset ", offset, "ok", ok, "nv", nv)
 		if nv.Offset == offset && nv.Size > 0 {
-			if err = nm.Put(n.Id, Offset(new_offset/NeedlePaddingSize), n.Size); err != nil {
+			if err = nm.Put(n.Id, Offset(newOffset/NeedlePaddingSize), n.Size); err != nil {
 				return fmt.Errorf("cannot put needle: %s", err)
 			}
-			if _, _, err = n.Append(dst, v.Version()); err != nil {
+			if _, _, _, err = n.Append(dst, v.Version()); err != nil {
 				return fmt.Errorf("cannot append needle: %s", err)
 			}
-			new_offset += n.DiskSize(v.Version())
-			glog.V(3).Infoln("saving key", n.Id, "volume offset", offset, "=>", new_offset, "data_size", n.Size)
+			newOffset += n.DiskSize(v.Version())
+			glog.V(3).Infoln("saving key", n.Id, "volume offset", offset, "=>", newOffset, "data_size", n.Size)
 		}
 		return nil
 	})

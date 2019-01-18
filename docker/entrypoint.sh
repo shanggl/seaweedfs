@@ -29,9 +29,18 @@ case "$1" in
   	;;
 
   'filer')
-  	ARGS="-ip `hostname -i`"
+  	ARGS="-ip `hostname -i` "
   	if [ -n "$MASTER_PORT_9333_TCP_ADDR" ] ; then
 		ARGS="$ARGS -master=$MASTER_PORT_9333_TCP_ADDR:$MASTER_PORT_9333_TCP_PORT"
+	fi
+	mkdir -p /data/filerdb
+  	exec /usr/bin/weed $@ $ARGS
+	;;
+
+  's3')
+  	ARGS="-domainName=$S3_DOMAIN_NAME -key.file=$S3_KEY_FILE -cert.file=$S3_CERT_FILE"
+  	if [ -n "$FILER_PORT_8888_TCP_ADDR" ] ; then
+		ARGS="$ARGS -filer=$FILER_PORT_8888_TCP_ADDR:$FILER_PORT_8888_TCP_PORT"
 	fi
   	exec /usr/bin/weed $@ $ARGS
 	;;

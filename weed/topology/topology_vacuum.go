@@ -15,7 +15,10 @@ func batchVacuumVolumeCheck(vl *VolumeLayout, vid storage.VolumeId, locationlist
 	for index, dn := range locationlist.list {
 		go func(index int, url string, vid storage.VolumeId) {
 			err := operation.WithVolumeServerClient(url, func(volumeServerClient volume_server_pb.VolumeServerClient) error {
-				resp, err := volumeServerClient.VacuumVolumeCheck(context.Background(), &volume_server_pb.VacuumVolumeCheckRequest{
+				ctx, cancel := context.WithTimeout(context.Background(), time.Duration(5*time.Second))
+				defer cancel()
+
+				resp, err := volumeServerClient.VacuumVolumeCheck(ctx, &volume_server_pb.VacuumVolumeCheckRequest{
 					VolumdId: uint32(vid),
 				})
 				if err != nil {
@@ -116,7 +119,7 @@ func batchVacuumVolumeCleanup(vl *VolumeLayout, vid storage.VolumeId, locationli
 }
 
 func (t *Topology) Vacuum(garbageThreshold float64, preallocate int64) int {
-	glog.V(0).Infof("Start vacuum on demand with threshold: %f", garbageThreshold)
+	glog.V(1).Infof("Start vacuum on demand with threshold: %f", garbageThreshold)
 	for _, col := range t.collectionMap.Items() {
 		c := col.(*Collection)
 		for _, vl := range c.storageType2VolumeLayout.Items() {
@@ -133,12 +136,12 @@ func vacuumOneVolumeLayout(volumeLayout *VolumeLayout, c *Collection, garbageThr
 
 	volumeLayout.accessLock.RLock()
 	tmpMap := make(map[storage.VolumeId]*VolumeLocationList)
-	for vid, locationlist := range volumeLayout.vid2location {
-		tmpMap[vid] = locationlist
+	for vid, locationList := range volumeLayout.vid2location {
+		tmpMap[vid] = locationList
 	}
 	volumeLayout.accessLock.RUnlock()
 
-	for vid, locationlist := range tmpMap {
+	for vid, locationList := range tmpMap {
 
 		volumeLayout.accessLock.RLock()
 		isReadOnly, hasValue := volumeLayout.readonlyVolumes[vid]
@@ -148,12 +151,12 @@ func vacuumOneVolumeLayout(volumeLayout *VolumeLayout, c *Collection, garbageThr
 			continue
 		}
 
-		glog.V(0).Infof("check vacuum on collection:%s volume:%d", c.Name, vid)
-		if batchVacuumVolumeCheck(volumeLayout, vid, locationlist, garbageThreshold) {
-			if batchVacuumVolumeCompact(volumeLayout, vid, locationlist, preallocate) {
-				batchVacuumVolumeCommit(volumeLayout, vid, locationlist)
+		glog.V(2).Infof("check vacuum on collection:%s volume:%d", c.Name, vid)
+		if batchVacuumVolumeCheck(volumeLayout, vid, locationList, garbageThreshold) {
+			if batchVacuumVolumeCompact(volumeLayout, vid, locationList, preallocate) {
+				batchVacuumVolumeCommit(volumeLayout, vid, locationList)
 			} else {
-				batchVacuumVolumeCleanup(volumeLayout, vid, locationlist)
+				batchVacuumVolumeCleanup(volumeLayout, vid, locationList)
 			}
 		}
 	}

@@ -9,6 +9,7 @@ import (
 	"github.com/chrislusf/seaweedfs/weed/glog"
 	. "github.com/chrislusf/seaweedfs/weed/storage/types"
 	"github.com/chrislusf/seaweedfs/weed/util"
+	"math"
 )
 
 const (
@@ -27,20 +28,19 @@ func (n *Needle) DiskSize(version Version) int64 {
 	return getActualSize(n.Size, version)
 }
 
-func (n *Needle) Append(w io.Writer, version Version) (size uint32, actualSize int64, err error) {
-	if s, ok := w.(io.Seeker); ok {
-		if end, e := s.Seek(0, 1); e == nil {
-			defer func(s io.Seeker, off int64) {
-				if err != nil {
-					if _, e = s.Seek(off, 0); e != nil {
-						glog.V(0).Infof("Failed to seek %s back to %d with error: %v", w, off, e)
-					}
+func (n *Needle) Append(w *os.File, version Version) (offset uint64, size uint32, actualSize int64, err error) {
+	if end, e := w.Seek(0, io.SeekEnd); e == nil {
+		defer func(w *os.File, off int64) {
+			if err != nil {
+				if te := w.Truncate(end); te != nil {
+					glog.V(0).Infof("Failed to truncate %s back to %d with error: %v", w.Name(), end, te)
 				}
-			}(s, end)
-		} else {
-			err = fmt.Errorf("Cannot Read Current Volume Position: %v", e)
-			return
-		}
+			}
+		}(w, end)
+		offset = uint64(end)
+	} else {
+		err = fmt.Errorf("Cannot Read Current Volume Position: %v", e)
+		return
 	}
 	switch version {
 	case Version1:
@@ -65,7 +65,12 @@ func (n *Needle) Append(w io.Writer, version Version) (size uint32, actualSize i
 		header := make([]byte, NeedleEntrySize+TimestampSize) // adding timestamp to reuse it and avoid extra allocation
 		CookieToBytes(header[0:CookieSize], n.Cookie)
 		NeedleIdToBytes(header[CookieSize:CookieSize+NeedleIdSize], n.Id)
-		n.DataSize, n.NameSize, n.MimeSize = uint32(len(n.Data)), uint8(len(n.Name)), uint8(len(n.Mime))
+		if len(n.Name) >= math.MaxUint8 {
+			n.NameSize = math.MaxUint8
+		} else {
+			n.NameSize = uint8(len(n.Name))
+		}
+		n.DataSize, n.MimeSize = uint32(len(n.Data)), uint8(len(n.Mime))
 		if n.DataSize > 0 {
 			n.Size = 4 + n.DataSize + 1
 			if n.HasName() {
@@ -108,7 +113,7 @@ func (n *Needle) Append(w io.Writer, version Version) (size uint32, actualSize i
 				if _, err = w.Write(header[0:1]); err != nil {
 					return
 				}
-				if _, err = w.Write(n.Name); err != nil {
+				if _, err = w.Write(n.Name[:n.NameSize]); err != nil {
 					return
 				}
 			}
@@ -153,9 +158,9 @@ func (n *Needle) Append(w io.Writer, version Version) (size uint32, actualSize i
 			_, err = w.Write(header[0 : NeedleChecksumSize+TimestampSize+padding])
 		}
 
-		return n.DataSize, getActualSize(n.Size, version), err
+		return offset, n.DataSize, getActualSize(n.Size, version), err
 	}
-	return 0, 0, fmt.Errorf("Unsupported Version! (%d)", version)
+	return 0, 0, 0, fmt.Errorf("Unsupported Version! (%d)", version)
 }
 
 func ReadNeedleBlob(r *os.File, offset int64, size uint32, version Version) (dataSlice []byte, err error) {
@@ -171,7 +176,7 @@ func (n *Needle) ReadData(r *os.File, offset int64, size uint32, version Version
 	}
 	n.ParseNeedleHeader(bytes)
 	if n.Size != size {
-		return fmt.Errorf("File Entry Not Found. Needle id %d expected size %d Memory %d", n.Id, n.Size, size)
+		return fmt.Errorf("File Entry Not Found. offset %d, Needle id %d expected size %d Memory %d", offset, n.Id, n.Size, size)
 	}
 	switch version {
 	case Version1:

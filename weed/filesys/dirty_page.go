@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/chrislusf/seaweedfs/weed/glog"
@@ -23,10 +24,21 @@ type ContinuousDirtyPages struct {
 
 func newDirtyPages(file *File) *ContinuousDirtyPages {
 	return &ContinuousDirtyPages{
-		Data: make([]byte, file.wfs.option.ChunkSizeLimit),
+		Data: nil,
 		f:    file,
 	}
 }
+
+func (pages *ContinuousDirtyPages) releaseResource() {
+	if pages.Data != nil {
+		pages.f.wfs.bufPool.Put(pages.Data)
+		pages.Data = nil
+		atomic.AddInt32(&counter, -1)
+		glog.V(3).Infof("%s/%s releasing resource %d", pages.f.dir.Path, pages.f.Name, counter)
+	}
+}
+
+var counter = int32(0)
 
 func (pages *ContinuousDirtyPages) AddPage(ctx context.Context, offset int64, data []byte) (chunks []*filer_pb.FileChunk, err error) {
 
@@ -35,9 +47,15 @@ func (pages *ContinuousDirtyPages) AddPage(ctx context.Context, offset int64, da
 
 	var chunk *filer_pb.FileChunk
 
-	if len(data) > len(pages.Data) {
+	if len(data) > int(pages.f.wfs.option.ChunkSizeLimit) {
 		// this is more than what buffer can hold.
 		return pages.flushAndSave(ctx, offset, data)
+	}
+
+	if pages.Data == nil {
+		pages.Data = pages.f.wfs.bufPool.Get().([]byte)
+		atomic.AddInt32(&counter, 1)
+		glog.V(3).Infof("%s/%s acquire resource %d", pages.f.dir.Path, pages.f.Name, counter)
 	}
 
 	if offset < pages.Offset || offset >= pages.Offset+int64(len(pages.Data)) ||
@@ -71,7 +89,7 @@ func (pages *ContinuousDirtyPages) AddPage(ctx context.Context, offset int64, da
 			copy(pages.Data[pages.Size:], data[pages.Size:])
 		} else {
 			if pages.Size != 0 {
-				glog.V(0).Infof("%s/%s add page: pages [%d, %d) write [%d, %d)", pages.f.dir.Path, pages.f.Name, pages.Offset, pages.Offset+pages.Size, offset, offset+int64(len(data)))
+				glog.V(1).Infof("%s/%s add page: pages [%d, %d) write [%d, %d)", pages.f.dir.Path, pages.f.Name, pages.Offset, pages.Offset+pages.Size, offset, offset+int64(len(data)))
 			}
 			return pages.flushAndSave(ctx, offset, data)
 		}

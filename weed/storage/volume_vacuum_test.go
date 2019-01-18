@@ -122,7 +122,7 @@ func TestCompaction(t *testing.T) {
 }
 func doSomeWritesDeletes(i int, v *Volume, t *testing.T, infos []*needleInfo) {
 	n := newRandomNeedle(uint64(i))
-	size, err := v.writeNeedle(n)
+	_, size, err := v.writeNeedle(n)
 	if err != nil {
 		t.Fatalf("write file %d: %v", i, err)
 	}
@@ -131,7 +131,7 @@ func doSomeWritesDeletes(i int, v *Volume, t *testing.T, infos []*needleInfo) {
 		crc:  n.Checksum,
 	}
 	// println("written file", i, "checksum", n.Checksum.Value(), "size", size)
-	if rand.Float64() < 0.5 {
+	if rand.Float64() < 0.03 {
 		toBeDeleted := rand.Intn(i) + 1
 		oldNeedle := newEmptyNeedle(uint64(toBeDeleted))
 		v.deleteNeedle(oldNeedle)

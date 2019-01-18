@@ -27,17 +27,32 @@ func LoadConfiguration(config *viper.Viper) {
 		return
 	}
 
-	for _, store := range MessageQueues {
-		if config.GetBool(store.GetName() + ".enabled") {
-			viperSub := config.Sub(store.GetName())
-			if err := store.Initialize(viperSub); err != nil {
-				glog.Fatalf("Failed to initialize store for %s: %+v",
-					store.GetName(), err)
+	validateOneEnabledQueue(config)
+
+	for _, queue := range MessageQueues {
+		if config.GetBool(queue.GetName() + ".enabled") {
+			viperSub := config.Sub(queue.GetName())
+			if err := queue.Initialize(viperSub); err != nil {
+				glog.Fatalf("Failed to initialize notification for %s: %+v",
+					queue.GetName(), err)
 			}
-			Queue = store
-			glog.V(0).Infof("Configure notification message queue for %s", store.GetName())
+			Queue = queue
+			glog.V(0).Infof("Configure notification message queue for %s", queue.GetName())
 			return
 		}
 	}
 
+}
+
+func validateOneEnabledQueue(config *viper.Viper) {
+	enabledQueue := ""
+	for _, queue := range MessageQueues {
+		if config.GetBool(queue.GetName() + ".enabled") {
+			if enabledQueue == "" {
+				enabledQueue = queue.GetName()
+			} else {
+				glog.Fatalf("Notification message queue is enabled for both %s and %s", enabledQueue, queue.GetName())
+			}
+		}
+	}
 }

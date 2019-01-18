@@ -45,7 +45,7 @@ var (
 )
 
 func init() {
-	cmdBenchmark.Run = runbenchmark // break init cycle
+	cmdBenchmark.Run = runBenchmark // break init cycle
 	cmdBenchmark.IsDebug = cmdBenchmark.Flag.Bool("debug", false, "verbose debug information")
 	b.masters = cmdBenchmark.Flag.String("master", "localhost:9333", "SeaweedFS master location")
 	b.concurrency = cmdBenchmark.Flag.Int("c", 16, "number of concurrent write or read processes")
@@ -101,7 +101,7 @@ var (
 	readStats  *stats
 )
 
-func runbenchmark(cmd *Command, args []string) bool {
+func runBenchmark(cmd *Command, args []string) bool {
 	fmt.Printf("This is SeaweedFS version %s %s %s\n", util.VERSION, runtime.GOOS, runtime.GOARCH)
 	if *b.maxCpu < 1 {
 		*b.maxCpu = runtime.NumCPU()
@@ -121,17 +121,17 @@ func runbenchmark(cmd *Command, args []string) bool {
 	masterClient.WaitUntilConnected()
 
 	if *b.write {
-		bench_write()
+		benchWrite()
 	}
 
 	if *b.read {
-		bench_read()
+		benchRead()
 	}
 
 	return true
 }
 
-func bench_write() {
+func benchWrite() {
 	fileIdLineChan := make(chan string)
 	finishChan := make(chan bool)
 	writeStats = newStats(*b.concurrency)
@@ -158,7 +158,7 @@ func bench_write() {
 	writeStats.printStats()
 }
 
-func bench_read() {
+func benchRead() {
 	fileIdLineChan := make(chan string)
 	finishChan := make(chan bool)
 	readStats = newStats(*b.concurrency)
@@ -213,7 +213,11 @@ func writeFiles(idChan chan int, fileIdLineChan chan string, s *stat) {
 	for id := range idChan {
 		start := time.Now()
 		fileSize := int64(*b.fileSize + random.Intn(64))
-		fp := &operation.FilePart{Reader: &FakeReader{id: uint64(id), size: fileSize}, FileSize: fileSize}
+		fp := &operation.FilePart{
+			Reader:   &FakeReader{id: uint64(id), size: fileSize},
+			FileSize: fileSize,
+			MimeType: "image/bench", // prevent gzip benchmark content
+		}
 		ar := &operation.VolumeAssignRequest{
 			Count:      1,
 			Collection: *b.collection,

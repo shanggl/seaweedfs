@@ -57,7 +57,7 @@ func init() {
 	v.dataCenter = cmdVolume.Flag.String("dataCenter", "", "current volume server's data center name")
 	v.rack = cmdVolume.Flag.String("rack", "", "current volume server's rack name")
 	v.indexType = cmdVolume.Flag.String("index", "memory", "Choose [memory|leveldb|boltdb|btree] mode for memory~performance balance.")
-	v.fixJpgOrientation = cmdVolume.Flag.Bool("images.fix.orientation", true, "Adjust jpg orientation when uploading.")
+	v.fixJpgOrientation = cmdVolume.Flag.Bool("images.fix.orientation", false, "Adjust jpg orientation when uploading.")
 	v.readRedirect = cmdVolume.Flag.Bool("read.redirect", true, "Redirect moved or non-local volumes.")
 	v.cpuProfile = cmdVolume.Flag.String("cpuprofile", "", "cpu profile output file")
 	v.memProfile = cmdVolume.Flag.String("memprofile", "", "memory profile output file")
@@ -155,7 +155,7 @@ func (v VolumeServerOptions) startVolumeServer(volumeFolders, maxVolumeCounts, v
 	)
 
 	listeningAddress := *v.bindIp + ":" + strconv.Itoa(*v.port)
-	glog.V(0).Infoln("Start Seaweed volume server", util.VERSION, "at", listeningAddress)
+	glog.V(0).Infof("Start Seaweed volume server %s at %s", util.VERSION, listeningAddress)
 	listener, e := util.NewListener(listeningAddress, time.Duration(*v.idleConnectionTimeout)*time.Second)
 	if e != nil {
 		glog.Fatalf("Volume server listener error:%v", e)

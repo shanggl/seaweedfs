@@ -15,7 +15,6 @@ import (
 	"github.com/chrislusf/seaweedfs/weed/util"
 	"io"
 	"net/http"
-	"path"
 	"strconv"
 	"time"
 )
@@ -61,10 +60,6 @@ var cmdCopy = &Command{
   All files under the folder and subfolders will be copyed.
   Optional parameter "-include" allows you to specify the file name patterns.
 
-  If any file has a ".gz" extension, the content are considered gzipped already, and will be stored as is.
-  This can save volume server's gzipped processing and allow customizable gzip compression level.
-  The file name will strip out ".gz" and stored. For example, "jquery.js.gz" will be stored as "jquery.js".
-
   If "maxMB" is set to a positive number, files larger than it would be split into chunks.
 
   `,
@@ -85,7 +80,8 @@ func runCopy(cmd *Command, args []string) bool {
 	}
 	urlPath := filerUrl.Path
 	if !strings.HasSuffix(urlPath, "/") {
-		urlPath = urlPath + "/"
+		fmt.Printf("The last argument should be a folder and end with \"/\": %v\n", err)
+		return false
 	}
 
 	if filerUrl.Port() == "" {
@@ -165,7 +161,6 @@ func uploadFileAsOne(filerAddress, filerGrpcAddress string, urlFolder string, f 
 	// upload the file content
 	fileName := filepath.Base(f.Name())
 	mimeType := detectMimeType(f)
-	isGzipped := isGzipped(fileName)
 
 	var chunks []*filer_pb.FileChunk
 
@@ -184,7 +179,7 @@ func uploadFileAsOne(filerAddress, filerGrpcAddress string, urlFolder string, f 
 
 		targetUrl := "http://" + assignResult.Url + "/" + assignResult.Fid
 
-		uploadResult, err := operation.Upload(targetUrl, fileName, f, isGzipped, mimeType, nil, "")
+		uploadResult, err := operation.Upload(targetUrl, fileName, f, false, mimeType, nil, "")
 		if err != nil {
 			fmt.Printf("upload data %v to %s: %v\n", fileName, targetUrl, err)
 			return false
@@ -318,13 +313,9 @@ func uploadFileInChunks(filerAddress, filerGrpcAddress string, urlFolder string,
 	return true
 }
 
-func isGzipped(filename string) bool {
-	return strings.ToLower(path.Ext(filename)) == ".gz"
-}
-
 func detectMimeType(f *os.File) string {
 	head := make([]byte, 512)
-	f.Seek(0, 0)
+	f.Seek(0, io.SeekStart)
 	n, err := f.Read(head)
 	if err == io.EOF {
 		return ""
@@ -333,7 +324,7 @@ func detectMimeType(f *os.File) string {
 		fmt.Printf("read head of %v: %v\n", f.Name(), err)
 		return "application/octet-stream"
 	}
-	f.Seek(0, 0)
+	f.Seek(0, io.SeekStart)
 	mimeType := http.DetectContentType(head[:n])
 	return mimeType
 }

@@ -1,15 +1,17 @@
 package filesys
 
 import (
-	"bazil.org/fuse"
-	"bazil.org/fuse/fs"
 	"context"
+	"os"
+	"path/filepath"
+	"sort"
+	"time"
+
 	"github.com/chrislusf/seaweedfs/weed/filer2"
 	"github.com/chrislusf/seaweedfs/weed/glog"
 	"github.com/chrislusf/seaweedfs/weed/pb/filer_pb"
-	"os"
-	"path/filepath"
-	"time"
+	"github.com/seaweedfs/fuse"
+	"github.com/seaweedfs/fuse/fs"
 )
 
 const blockSize = 512
@@ -20,11 +22,12 @@ var _ = fs.NodeFsyncer(&File{})
 var _ = fs.NodeSetattrer(&File{})
 
 type File struct {
-	Name   string
-	dir    *Dir
-	wfs    *WFS
-	entry  *filer_pb.Entry
-	isOpen bool
+	Name           string
+	dir            *Dir
+	wfs            *WFS
+	entry          *filer_pb.Entry
+	entryViewCache []filer2.VisibleInterval
+	isOpen         bool
 }
 
 func (file *File) fullpath() string {
@@ -82,6 +85,7 @@ func (file *File) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *f
 		if req.Size == 0 {
 			// fmt.Printf("truncate %v \n", fullPath)
 			file.entry.Chunks = nil
+			file.entryViewCache = nil
 		}
 		file.entry.Attributes.FileSize = req.Size
 	}
@@ -95,6 +99,10 @@ func (file *File) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *f
 
 	if req.Valid.Gid() {
 		file.entry.Attributes.Gid = req.Gid
+	}
+
+	if req.Valid.Crtime() {
+		file.entry.Attributes.Crtime = req.Crtime.Unix()
 	}
 
 	if req.Valid.Mtime() {
@@ -133,7 +141,7 @@ func (file *File) maybeLoadAttributes(ctx context.Context) error {
 		item := file.wfs.listDirectoryEntriesCache.Get(file.fullpath())
 		if item != nil && !item.Expired() {
 			entry := item.Value().(*filer_pb.Entry)
-			file.entry = entry
+			file.setEntry(entry)
 			// glog.V(1).Infof("file attr read cached %v attributes", file.Name)
 		} else {
 			err := file.wfs.withFilerClient(func(client filer_pb.SeaweedFilerClient) error {
@@ -145,13 +153,15 @@ func (file *File) maybeLoadAttributes(ctx context.Context) error {
 
 				resp, err := client.LookupDirectoryEntry(ctx, request)
 				if err != nil {
-					glog.V(0).Infof("file attr read file %v: %v", request, err)
-					return err
+					glog.V(3).Infof("file attr read file %v: %v", request, err)
+					return fuse.ENOENT
 				}
 
-				file.entry = resp.Entry
+				file.setEntry(resp.Entry)
 
-				glog.V(1).Infof("file attr %v %+v: %d", file.fullpath(), file.entry.Attributes, filer2.TotalSize(file.entry.Chunks))
+				glog.V(3).Infof("file attr %v %+v: %d", file.fullpath(), file.entry.Attributes, filer2.TotalSize(file.entry.Chunks))
+
+				// file.wfs.listDirectoryEntriesCache.Set(file.fullpath(), file.entry, file.wfs.option.EntryCacheTtl)
 
 				return nil
 			})
@@ -162,4 +172,32 @@ func (file *File) maybeLoadAttributes(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func (file *File) addChunk(chunk *filer_pb.FileChunk) {
+	if chunk != nil {
+		file.addChunks([]*filer_pb.FileChunk{chunk})
+	}
+}
+
+func (file *File) addChunks(chunks []*filer_pb.FileChunk) {
+
+	sort.Slice(chunks, func(i, j int) bool {
+		return chunks[i].Mtime < chunks[j].Mtime
+	})
+
+	var newVisibles []filer2.VisibleInterval
+	for _, chunk := range chunks {
+		newVisibles = filer2.MergeIntoVisibles(file.entryViewCache, newVisibles, chunk)
+		t := file.entryViewCache[:0]
+		file.entryViewCache = newVisibles
+		newVisibles = t
+	}
+
+	file.entry.Chunks = append(file.entry.Chunks, chunks...)
+}
+
+func (file *File) setEntry(entry *filer_pb.Entry) {
+	file.entry = entry
+	file.entryViewCache = filer2.NonOverlappingVisibleIntervals(file.entry.Chunks)
 }

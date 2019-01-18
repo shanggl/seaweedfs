@@ -35,15 +35,18 @@ func (entry *Entry) DecodeAttributesAndChunks(blob []byte) error {
 func EntryAttributeToPb(entry *Entry) *filer_pb.FuseAttributes {
 
 	return &filer_pb.FuseAttributes{
-		Crtime:      entry.Attr.Crtime.Unix(),
-		Mtime:       entry.Attr.Mtime.Unix(),
-		FileMode:    uint32(entry.Attr.Mode),
-		Uid:         entry.Uid,
-		Gid:         entry.Gid,
-		Mime:        entry.Mime,
-		Collection:  entry.Attr.Collection,
-		Replication: entry.Attr.Replication,
-		TtlSec:      entry.Attr.TtlSec,
+		Crtime:        entry.Attr.Crtime.Unix(),
+		Mtime:         entry.Attr.Mtime.Unix(),
+		FileMode:      uint32(entry.Attr.Mode),
+		Uid:           entry.Uid,
+		Gid:           entry.Gid,
+		Mime:          entry.Mime,
+		Collection:    entry.Attr.Collection,
+		Replication:   entry.Attr.Replication,
+		TtlSec:        entry.Attr.TtlSec,
+		UserName:      entry.Attr.UserName,
+		GroupName:     entry.Attr.GroupNames,
+		SymlinkTarget: entry.Attr.SymlinkTarget,
 	}
 }
 
@@ -60,6 +63,9 @@ func PbToEntryAttribute(attr *filer_pb.FuseAttributes) Attr {
 	t.Collection = attr.Collection
 	t.Replication = attr.Replication
 	t.TtlSec = attr.TtlSec
+	t.UserName = attr.UserName
+	t.GroupNames = attr.GroupName
+	t.SymlinkTarget = attr.SymlinkTarget
 
 	return t
 }

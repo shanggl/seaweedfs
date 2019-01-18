@@ -12,7 +12,7 @@ import (
 )
 
 func parseMultipart(r *http.Request) (
-	fileName string, data []byte, mimeType string, isGzipped, isChunkedFile bool, e error) {
+	fileName string, data []byte, mimeType string, isGzipped bool, originalDataSize int, isChunkedFile bool, e error) {
 	form, fe := r.MultipartReader()
 	if fe != nil {
 		glog.V(0).Infoln("MultipartReader [ERROR]", fe)
@@ -64,6 +64,8 @@ func parseMultipart(r *http.Request) (
 		}
 	}
 
+	originalDataSize = len(data)
+
 	isChunkedFile, _ = strconv.ParseBool(r.FormValue("cm"))
 
 	if !isChunkedFile {
@@ -81,21 +83,15 @@ func parseMultipart(r *http.Request) (
 		}
 
 		if part.Header.Get("Content-Encoding") == "gzip" {
+			if unzipped, e := operation.UnGzipData(data); e == nil {
+				originalDataSize = len(unzipped)
+			}
 			isGzipped = true
-		} else if operation.IsGzippable(ext, mtype) {
+		} else if operation.IsGzippable(ext, mtype, data) {
 			if data, e = operation.GzipData(data); e != nil {
 				return
 			}
 			isGzipped = true
-		}
-		if ext == ".gz" {
-			if strings.HasSuffix(fileName, ".css.gz") ||
-				strings.HasSuffix(fileName, ".html.gz") ||
-				strings.HasSuffix(fileName, ".txt.gz") ||
-				strings.HasSuffix(fileName, ".js.gz") {
-				fileName = fileName[:len(fileName)-3]
-				isGzipped = true
-			}
 		}
 	}
 

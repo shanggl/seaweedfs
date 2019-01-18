@@ -8,15 +8,18 @@ import (
 )
 
 type Attr struct {
-	Mtime       time.Time   // time of last modification
-	Crtime      time.Time   // time of creation (OS X only)
-	Mode        os.FileMode // file mode
-	Uid         uint32      // owner uid
-	Gid         uint32      // group gid
-	Mime        string      // mime type
-	Replication string      // replication
-	Collection  string      // collection name
-	TtlSec      int32       // ttl in seconds
+	Mtime         time.Time   // time of last modification
+	Crtime        time.Time   // time of creation (OS X only)
+	Mode          os.FileMode // file mode
+	Uid           uint32      // owner uid
+	Gid           uint32      // group gid
+	Mime          string      // mime type
+	Replication   string      // replication
+	Collection    string      // collection name
+	TtlSec        int32       // ttl in seconds
+	UserName      string
+	GroupNames    []string
+	SymlinkTarget string
 }
 
 func (attr Attr) IsDirectory() bool {
@@ -41,5 +44,17 @@ func (entry *Entry) Timestamp() time.Time {
 		return entry.Crtime
 	} else {
 		return entry.Mtime
+	}
+}
+
+func (entry *Entry) ToProtoEntry() *filer_pb.Entry {
+	if entry == nil {
+		return nil
+	}
+	return &filer_pb.Entry{
+		Name:        string(entry.FullPath),
+		IsDirectory: entry.IsDirectory(),
+		Attributes:  EntryAttributeToPb(entry),
+		Chunks:      entry.Chunks,
 	}
 }

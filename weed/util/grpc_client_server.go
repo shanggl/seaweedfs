@@ -1,10 +1,18 @@
 package util
 
 import (
+	"fmt"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
+)
+
+var (
+	// cache grpc connections
+	grpcClients     = make(map[string]*grpc.ClientConn)
+	grpcClientsLock sync.Mutex
 )
 
 func NewGrpcServer() *grpc.Server {
@@ -17,7 +25,8 @@ func NewGrpcServer() *grpc.Server {
 }
 
 func GrpcDial(address string, opts ...grpc.DialOption) (*grpc.ClientConn, error) {
-
+	opts = append(opts, grpc.WithBlock())
+	opts = append(opts, grpc.WithTimeout(time.Duration(5*time.Second)))
 	opts = append(opts, grpc.WithInsecure())
 	opts = append(opts, grpc.WithKeepaliveParams(keepalive.ClientParameters{
 		Time:    30 * time.Second, // client ping server if no activity for this long
@@ -25,4 +34,33 @@ func GrpcDial(address string, opts ...grpc.DialOption) (*grpc.ClientConn, error)
 	}))
 
 	return grpc.Dial(address, opts...)
+}
+
+func WithCachedGrpcClient(fn func(*grpc.ClientConn) error, address string, opts ...grpc.DialOption) error {
+
+	grpcClientsLock.Lock()
+
+	existingConnection, found := grpcClients[address]
+	if found {
+		grpcClientsLock.Unlock()
+		return fn(existingConnection)
+	}
+
+	grpcConnection, err := GrpcDial(address, opts...)
+	if err != nil {
+		grpcClientsLock.Unlock()
+		return fmt.Errorf("fail to dial %s: %v", address, err)
+	}
+
+	grpcClients[address] = grpcConnection
+	grpcClientsLock.Unlock()
+
+	err = fn(grpcConnection)
+	if err != nil {
+		grpcClientsLock.Lock()
+		delete(grpcClients, address)
+		grpcClientsLock.Unlock()
+	}
+
+	return err
 }

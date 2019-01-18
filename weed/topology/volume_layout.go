@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"sync"
+	"time"
 
 	"github.com/chrislusf/seaweedfs/weed/glog"
 	"github.com/chrislusf/seaweedfs/weed/storage"
@@ -20,6 +21,12 @@ type VolumeLayout struct {
 	oversizedVolumes map[storage.VolumeId]bool // set of oversized volumes
 	volumeSizeLimit  uint64
 	accessLock       sync.RWMutex
+}
+
+type VolumeLayoutStats struct {
+	TotalSize uint64
+	UsedSize  uint64
+	FileCount uint64
 }
 
 func NewVolumeLayout(rp *storage.ReplicaPlacement, ttl *storage.TTL, volumeSizeLimit uint64) *VolumeLayout {
@@ -46,10 +53,10 @@ func (vl *VolumeLayout) RegisterVolume(v *storage.VolumeInfo, dn *DataNode) {
 		vl.vid2location[v.Id] = NewVolumeLocationList()
 	}
 	vl.vid2location[v.Id].Set(dn)
-	glog.V(4).Infoln("volume", v.Id, "added to dn", dn.Id(), "len", vl.vid2location[v.Id].Length(), "copy", v.ReplicaPlacement.GetCopyCount())
+	// glog.V(4).Infof("volume %d added to %s len %d copy %d", v.Id, dn.Id(), vl.vid2location[v.Id].Length(), v.ReplicaPlacement.GetCopyCount())
 	for _, dn := range vl.vid2location[v.Id].list {
-		if v_info, err := dn.GetVolumesById(v.Id); err == nil {
-			if v_info.ReadOnly {
+		if vInfo, err := dn.GetVolumesById(v.Id); err == nil {
+			if vInfo.ReadOnly {
 				glog.V(3).Infof("vid %d removed from writable", v.Id)
 				vl.removeFromWritable(v.Id)
 				vl.readonlyVolumes[v.Id] = true
@@ -138,13 +145,13 @@ func (vl *VolumeLayout) PickForWrite(count uint64, option *VolumeGrowOption) (*s
 	vl.accessLock.RLock()
 	defer vl.accessLock.RUnlock()
 
-	len_writers := len(vl.writables)
-	if len_writers <= 0 {
+	lenWriters := len(vl.writables)
+	if lenWriters <= 0 {
 		glog.V(0).Infoln("No more writable volumes!")
 		return nil, 0, nil, errors.New("No more writable volumes!")
 	}
 	if option.DataCenter == "" {
-		vid := vl.writables[rand.Intn(len_writers)]
+		vid := vl.writables[rand.Intn(lenWriters)]
 		locationList := vl.vid2location[vid]
 		if locationList != nil {
 			return &vid, count, locationList, nil
@@ -264,4 +271,26 @@ func (vl *VolumeLayout) ToMap() map[string]interface{} {
 	m["writables"] = vl.writables
 	//m["locations"] = vl.vid2location
 	return m
+}
+
+func (vl *VolumeLayout) Stats() *VolumeLayoutStats {
+	vl.accessLock.RLock()
+	defer vl.accessLock.RUnlock()
+
+	ret := &VolumeLayoutStats{}
+
+	freshThreshold := time.Now().Unix() - 60
+
+	for vid, vll := range vl.vid2location {
+		size, fileCount := vll.Stats(vid, freshThreshold)
+		ret.FileCount += uint64(fileCount)
+		ret.UsedSize += size
+		if vl.readonlyVolumes[vid] {
+			ret.TotalSize += size
+		} else {
+			ret.TotalSize += vl.volumeSizeLimit
+		}
+	}
+
+	return ret
 }

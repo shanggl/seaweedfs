@@ -89,7 +89,7 @@ func init() {
 	serverOptions.v.port = cmdServer.Flag.Int("volume.port", 8080, "volume server http listen port")
 	serverOptions.v.publicPort = cmdServer.Flag.Int("volume.port.public", 0, "volume server public port")
 	serverOptions.v.indexType = cmdServer.Flag.String("volume.index", "memory", "Choose [memory|leveldb|boltdb|btree] mode for memory~performance balance.")
-	serverOptions.v.fixJpgOrientation = cmdServer.Flag.Bool("volume.images.fix.orientation", true, "Adjust jpg orientation when uploading.")
+	serverOptions.v.fixJpgOrientation = cmdServer.Flag.Bool("volume.images.fix.orientation", false, "Adjust jpg orientation when uploading.")
 	serverOptions.v.readRedirect = cmdServer.Flag.Bool("volume.read.redirect", true, "Redirect moved or non-local volumes.")
 	serverOptions.v.publicUrl = cmdServer.Flag.String("volume.publicUrl", "", "publicly accessible address")
 
@@ -144,6 +144,7 @@ func runServer(cmd *Command, args []string) bool {
 	if err := util.TestFolderWritable(*masterMetaFolder); err != nil {
 		glog.Fatalf("Check Meta Folder (-mdir=\"%s\") Writable: %s", *masterMetaFolder, err)
 	}
+	filerOptions.defaultLevelDbDirectory = masterMetaFolder
 
 	if *serverWhiteListOption != "" {
 		serverWhiteList = strings.Split(*serverWhiteListOption, ",")
@@ -172,7 +173,7 @@ func runServer(cmd *Command, args []string) bool {
 			serverWhiteList, *serverSecureKey,
 		)
 
-		glog.V(0).Infoln("Start Seaweed Master", util.VERSION, "at", *serverIp+":"+strconv.Itoa(*masterPort))
+		glog.V(0).Infof("Start Seaweed Master %s at %s:%d", util.VERSION, *serverIp, *masterPort)
 		masterListener, e := util.NewListener(*serverBindIp+":"+strconv.Itoa(*masterPort), 0)
 		if e != nil {
 			glog.Fatalf("Master startup error: %v", e)

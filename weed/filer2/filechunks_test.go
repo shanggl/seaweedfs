@@ -4,6 +4,7 @@ import (
 	"log"
 	"testing"
 
+	"fmt"
 	"github.com/chrislusf/seaweedfs/weed/pb/filer_pb"
 )
 
@@ -15,25 +16,54 @@ func TestCompactFileChunks(t *testing.T) {
 		{Offset: 110, Size: 200, FileId: "jkl", Mtime: 300},
 	}
 
-	compacted, garbarge := CompactFileChunks(chunks)
-
-	log.Printf("Compacted: %+v", compacted)
-	log.Printf("Garbage  : %+v", garbarge)
+	compacted, garbage := CompactFileChunks(chunks)
 
 	if len(compacted) != 3 {
 		t.Fatalf("unexpected compacted: %d", len(compacted))
 	}
-	if len(garbarge) != 1 {
-		t.Fatalf("unexpected garbarge: %d", len(garbarge))
+	if len(garbage) != 1 {
+		t.Fatalf("unexpected garbage: %d", len(garbage))
 	}
 
+}
+
+func TestCompactFileChunks2(t *testing.T) {
+
+	chunks := []*filer_pb.FileChunk{
+		{Offset: 0, Size: 100, FileId: "abc", Mtime: 50},
+		{Offset: 100, Size: 100, FileId: "def", Mtime: 100},
+		{Offset: 200, Size: 100, FileId: "ghi", Mtime: 200},
+		{Offset: 0, Size: 100, FileId: "abcf", Mtime: 300},
+		{Offset: 50, Size: 100, FileId: "fhfh", Mtime: 400},
+		{Offset: 100, Size: 100, FileId: "yuyu", Mtime: 500},
+	}
+
+	k := 3
+
+	for n := 0; n < k; n++ {
+		chunks = append(chunks, &filer_pb.FileChunk{
+			Offset: int64(n * 100), Size: 100, FileId: fmt.Sprintf("fileId%d", n), Mtime: int64(n),
+		})
+		chunks = append(chunks, &filer_pb.FileChunk{
+			Offset: int64(n * 50), Size: 100, FileId: fmt.Sprintf("fileId%d", n+k), Mtime: int64(n + k),
+		})
+	}
+
+	compacted, garbage := CompactFileChunks(chunks)
+
+	if len(compacted) != 4 {
+		t.Fatalf("unexpected compacted: %d", len(compacted))
+	}
+	if len(garbage) != 8 {
+		t.Fatalf("unexpected garbage: %d", len(garbage))
+	}
 }
 
 func TestIntervalMerging(t *testing.T) {
 
 	testcases := []struct {
 		Chunks   []*filer_pb.FileChunk
-		Expected []*visibleInterval
+		Expected []*VisibleInterval
 	}{
 		// case 0: normal
 		{
@@ -42,7 +72,7 @@ func TestIntervalMerging(t *testing.T) {
 				{Offset: 100, Size: 100, FileId: "asdf", Mtime: 134},
 				{Offset: 200, Size: 100, FileId: "fsad", Mtime: 353},
 			},
-			Expected: []*visibleInterval{
+			Expected: []*VisibleInterval{
 				{start: 0, stop: 100, fileId: "abc"},
 				{start: 100, stop: 200, fileId: "asdf"},
 				{start: 200, stop: 300, fileId: "fsad"},
@@ -54,7 +84,7 @@ func TestIntervalMerging(t *testing.T) {
 				{Offset: 0, Size: 100, FileId: "abc", Mtime: 123},
 				{Offset: 0, Size: 200, FileId: "asdf", Mtime: 134},
 			},
-			Expected: []*visibleInterval{
+			Expected: []*VisibleInterval{
 				{start: 0, stop: 200, fileId: "asdf"},
 			},
 		},
@@ -64,7 +94,7 @@ func TestIntervalMerging(t *testing.T) {
 				{Offset: 0, Size: 100, FileId: "abc", Mtime: 123},
 				{Offset: 0, Size: 50, FileId: "asdf", Mtime: 134},
 			},
-			Expected: []*visibleInterval{
+			Expected: []*VisibleInterval{
 				{start: 0, stop: 50, fileId: "asdf"},
 				{start: 50, stop: 100, fileId: "abc"},
 			},
@@ -76,7 +106,7 @@ func TestIntervalMerging(t *testing.T) {
 				{Offset: 0, Size: 200, FileId: "asdf", Mtime: 134},
 				{Offset: 50, Size: 250, FileId: "xxxx", Mtime: 154},
 			},
-			Expected: []*visibleInterval{
+			Expected: []*VisibleInterval{
 				{start: 0, stop: 50, fileId: "asdf"},
 				{start: 50, stop: 300, fileId: "xxxx"},
 			},
@@ -88,7 +118,7 @@ func TestIntervalMerging(t *testing.T) {
 				{Offset: 0, Size: 200, FileId: "asdf", Mtime: 134},
 				{Offset: 250, Size: 250, FileId: "xxxx", Mtime: 154},
 			},
-			Expected: []*visibleInterval{
+			Expected: []*VisibleInterval{
 				{start: 0, stop: 200, fileId: "asdf"},
 				{start: 250, stop: 500, fileId: "xxxx"},
 			},
@@ -101,7 +131,7 @@ func TestIntervalMerging(t *testing.T) {
 				{Offset: 70, Size: 150, FileId: "abc", Mtime: 143},
 				{Offset: 80, Size: 100, FileId: "xxxx", Mtime: 134},
 			},
-			Expected: []*visibleInterval{
+			Expected: []*VisibleInterval{
 				{start: 0, stop: 200, fileId: "asdf"},
 				{start: 200, stop: 220, fileId: "abc"},
 			},
@@ -113,7 +143,7 @@ func TestIntervalMerging(t *testing.T) {
 				{Offset: 0, Size: 100, FileId: "abc", Mtime: 123},
 				{Offset: 0, Size: 100, FileId: "abc", Mtime: 123},
 			},
-			Expected: []*visibleInterval{
+			Expected: []*VisibleInterval{
 				{start: 0, stop: 100, fileId: "abc"},
 			},
 		},
@@ -127,7 +157,7 @@ func TestIntervalMerging(t *testing.T) {
 				{Offset: 8388608, Size: 3145728, FileId: "5,02982f80de50", Mtime: 160},
 				{Offset: 11534336, Size: 2842193, FileId: "7,0299ad723803", Mtime: 170},
 			},
-			Expected: []*visibleInterval{
+			Expected: []*VisibleInterval{
 				{start: 0, stop: 2097152, fileId: "3,029565bf3092"},
 				{start: 2097152, stop: 5242880, fileId: "6,029632f47ae2"},
 				{start: 5242880, stop: 8388608, fileId: "2,029734c5aa10"},
@@ -135,11 +165,28 @@ func TestIntervalMerging(t *testing.T) {
 				{start: 11534336, stop: 14376529, fileId: "7,0299ad723803"},
 			},
 		},
+		// case 8: real bug
+		{
+			Chunks: []*filer_pb.FileChunk{
+				{Offset: 0, Size: 77824, FileId: "4,0b3df938e301", Mtime: 123},
+				{Offset: 471040, Size: 472225 - 471040, FileId: "6,0b3e0650019c", Mtime: 130},
+				{Offset: 77824, Size: 208896 - 77824, FileId: "4,0b3f0c7202f0", Mtime: 140},
+				{Offset: 208896, Size: 339968 - 208896, FileId: "2,0b4031a72689", Mtime: 150},
+				{Offset: 339968, Size: 471040 - 339968, FileId: "3,0b416a557362", Mtime: 160},
+			},
+			Expected: []*VisibleInterval{
+				{start: 0, stop: 77824, fileId: "4,0b3df938e301"},
+				{start: 77824, stop: 208896, fileId: "4,0b3f0c7202f0"},
+				{start: 208896, stop: 339968, fileId: "2,0b4031a72689"},
+				{start: 339968, stop: 471040, fileId: "3,0b416a557362"},
+				{start: 471040, stop: 472225, fileId: "6,0b3e0650019c"},
+			},
+		},
 	}
 
 	for i, testcase := range testcases {
 		log.Printf("++++++++++ merged test case %d ++++++++++++++++++++", i)
-		intervals := nonOverlappingVisibleIntervals(testcase.Chunks)
+		intervals := NonOverlappingVisibleIntervals(testcase.Chunks)
 		for x, interval := range intervals {
 			log.Printf("test case %d, interval %d, start=%d, stop=%d, fileId=%s",
 				i, x, interval.start, interval.stop, interval.fileId)
@@ -161,6 +208,7 @@ func TestIntervalMerging(t *testing.T) {
 		if len(intervals) != len(testcase.Expected) {
 			t.Fatalf("failed to compact test case %d, len %d expected %d", i, len(intervals), len(testcase.Expected))
 		}
+
 	}
 
 }
@@ -313,4 +361,24 @@ func TestChunksReading(t *testing.T) {
 		}
 	}
 
+}
+
+func BenchmarkCompactFileChunks(b *testing.B) {
+
+	var chunks []*filer_pb.FileChunk
+
+	k := 1024
+
+	for n := 0; n < k; n++ {
+		chunks = append(chunks, &filer_pb.FileChunk{
+			Offset: int64(n * 100), Size: 100, FileId: fmt.Sprintf("fileId%d", n), Mtime: int64(n),
+		})
+		chunks = append(chunks, &filer_pb.FileChunk{
+			Offset: int64(n * 50), Size: 100, FileId: fmt.Sprintf("fileId%d", n+k), Mtime: int64(n + k),
+		})
+	}
+
+	for n := 0; n < b.N; n++ {
+		CompactFileChunks(chunks)
+	}
 }

@@ -69,7 +69,7 @@ func writeJson(w http.ResponseWriter, r *http.Request, httpStatus int, obj inter
 // wrapper for writeJson - just logs errors
 func writeJsonQuiet(w http.ResponseWriter, r *http.Request, httpStatus int, obj interface{}) {
 	if err := writeJson(w, r, httpStatus, obj); err != nil {
-		glog.V(0).Infof("error writing JSON %s: %v", obj, err)
+		glog.V(0).Infof("error writing JSON %+v status %d: %v", obj, httpStatus, err)
 	}
 }
 func writeJsonError(w http.ResponseWriter, r *http.Request, httpStatus int, err error) {
@@ -91,7 +91,7 @@ func submitForClientHandler(w http.ResponseWriter, r *http.Request, masterUrl st
 	}
 
 	debug("parsing upload file...")
-	fname, data, mimeType, pairMap, isGzipped, lastModified, _, _, pe := storage.ParseUpload(r)
+	fname, data, mimeType, pairMap, isGzipped, originalDataSize, lastModified, _, _, pe := storage.ParseUpload(r)
 	if pe != nil {
 		writeJsonError(w, r, http.StatusBadRequest, pe)
 		return
@@ -99,8 +99,16 @@ func submitForClientHandler(w http.ResponseWriter, r *http.Request, masterUrl st
 
 	debug("assigning file id for", fname)
 	r.ParseForm()
+	count := uint64(1)
+	if r.FormValue("count") != "" {
+		count, pe = strconv.ParseUint(r.FormValue("count"), 10, 32)
+		if pe != nil {
+			writeJsonError(w, r, http.StatusBadRequest, pe)
+			return
+		}
+	}
 	ar := &operation.VolumeAssignRequest{
-		Count:       1,
+		Count:       count,
 		Replication: r.FormValue("replication"),
 		Collection:  r.FormValue("collection"),
 		Ttl:         r.FormValue("ttl"),
@@ -126,7 +134,7 @@ func submitForClientHandler(w http.ResponseWriter, r *http.Request, masterUrl st
 	m["fileName"] = fname
 	m["fid"] = assignResult.Fid
 	m["fileUrl"] = assignResult.PublicUrl + "/" + assignResult.Fid
-	m["size"] = uploadResult.Size
+	m["size"] = originalDataSize
 	m["eTag"] = uploadResult.ETag
 	writeJsonQuiet(w, r, http.StatusCreated, m)
 	return

@@ -41,6 +41,8 @@ func runFilerReplicate(cmd *Command, args []string) bool {
 
 	var notificationInput sub.NotificationInput
 
+	validateOneEnabledInput(config)
+
 	for _, input := range sub.NotificationInputs {
 		if config.GetBool("notification." + input.GetName() + ".enabled") {
 			viperSub := config.Sub("notification." + input.GetName())
@@ -115,8 +117,23 @@ func runFilerReplicate(cmd *Command, args []string) bool {
 		}
 		if err = replicator.Replicate(key, m); err != nil {
 			glog.Errorf("replicate %s: %+v", key, err)
+		} else {
+			glog.V(1).Infof("replicated %s", key)
 		}
 	}
 
 	return true
+}
+
+func validateOneEnabledInput(config *viper.Viper) {
+	enabledInput := ""
+	for _, input := range sub.NotificationInputs {
+		if config.GetBool("notification." + input.GetName() + ".enabled") {
+			if enabledInput == "" {
+				enabledInput = input.GetName()
+			} else {
+				glog.Fatalf("Notification input is enabled for both %s and %s", enabledInput, input.GetName())
+			}
+		}
+	}
 }

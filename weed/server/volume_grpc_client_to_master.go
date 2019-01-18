@@ -40,7 +40,7 @@ func (vs *VolumeServer) doHeartbeat(masterNode string, sleepInterval time.Durati
 
 	grpcConection, err := util.GrpcDial(masterNode)
 	if err != nil {
-		return "", fmt.Errorf("fail to dial: %v", err)
+		return "", fmt.Errorf("fail to dial %s : %v", masterNode, err)
 	}
 	defer grpcConection.Close()
 
@@ -110,7 +110,7 @@ func (vs *VolumeServer) doHeartbeat(masterNode string, sleepInterval time.Durati
 				glog.V(0).Infof("Volume Server Failed to talk with master %s: %v", masterNode, err)
 				return "", err
 			}
-		case <-doneChan:
+		case err = <-doneChan:
 			return
 		}
 	}

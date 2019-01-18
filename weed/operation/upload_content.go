@@ -13,6 +13,7 @@ import (
 	"net/textproto"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/chrislusf/seaweedfs/weed/glog"
 	"github.com/chrislusf/seaweedfs/weed/security"
@@ -22,7 +23,7 @@ type UploadResult struct {
 	Name  string `json:"name,omitempty"`
 	Size  uint32 `json:"size,omitempty"`
 	Error string `json:"error,omitempty"`
-	ETag  string `json:"error,omitempty"`
+	ETag  string `json:"eTag,omitempty"`
 }
 
 var (
@@ -30,13 +31,15 @@ var (
 )
 
 func init() {
-	client = &http.Client{Transport: &http.Transport{
-		MaxIdleConnsPerHost: 1024,
-	}}
+	client = &http.Client{
+		Transport: &http.Transport{MaxIdleConnsPerHost: 1024},
+		Timeout:   5 * time.Second,
+	}
 }
 
 var fileNameEscaper = strings.NewReplacer("\\", "\\\\", "\"", "\\\"")
 
+// Upload sends a POST request to a volume server to upload the content
 func Upload(uploadUrl string, filename string, reader io.Reader, isGzipped bool, mtype string, pairMap map[string]string, jwt security.EncodedJwt) (*UploadResult, error) {
 	return upload_content(uploadUrl, func(w io.Writer) (err error) {
 		_, err = io.Copy(w, reader)
@@ -91,6 +94,12 @@ func upload_content(uploadUrl string, fillBufferFunction func(w io.Writer) error
 		return nil, post_err
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode < http.StatusOK ||
+		resp.StatusCode > http.StatusIMUsed {
+		return nil, errors.New(http.StatusText(resp.StatusCode))
+	}
+
 	etag := getEtag(resp)
 	resp_body, ra_err := ioutil.ReadAll(resp.Body)
 	if ra_err != nil {

@@ -5,15 +5,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/chrislusf/seaweedfs/weed/filer2"
 	"github.com/chrislusf/seaweedfs/weed/glog"
 	"github.com/chrislusf/seaweedfs/weed/operation"
 	"github.com/chrislusf/seaweedfs/weed/pb/filer_pb"
+	"github.com/chrislusf/seaweedfs/weed/pb/master_pb"
 	"github.com/chrislusf/seaweedfs/weed/util"
-	"strconv"
-	"strings"
 )
 
 func (fs *FilerServer) LookupDirectoryEntry(ctx context.Context, req *filer_pb.LookupDirectoryEntryRequest) (*filer_pb.LookupDirectoryEntryResponse, error) {
@@ -44,7 +45,7 @@ func (fs *FilerServer) ListEntries(ctx context.Context, req *filer_pb.ListEntrie
 	lastFileName := req.StartFromFileName
 	includeLastFile := req.InclusiveStartFrom
 	for limit > 0 {
-		entries, err := fs.filer.ListDirectoryEntries(filer2.FullPath(req.Directory), lastFileName, includeLastFile, limit)
+		entries, err := fs.filer.ListDirectoryEntries(filer2.FullPath(req.Directory), lastFileName, includeLastFile, 1024)
 		if err != nil {
 			return nil, err
 		}
@@ -71,6 +72,10 @@ func (fs *FilerServer) ListEntries(ctx context.Context, req *filer_pb.ListEntrie
 				Attributes:  filer2.EntryAttributeToPb(entry),
 			})
 			limit--
+		}
+
+		if len(resp.Entries) < 1024 {
+			break
 		}
 
 	}
@@ -111,6 +116,10 @@ func (fs *FilerServer) CreateEntry(ctx context.Context, req *filer_pb.CreateEntr
 	chunks, garbages := filer2.CompactFileChunks(req.Entry.Chunks)
 
 	fs.filer.DeleteChunks(garbages)
+
+	if req.Entry.Attributes == nil {
+		return nil, fmt.Errorf("can not create entry with empty attributes")
+	}
 
 	err = fs.filer.CreateEntry(&filer2.Entry{
 		FullPath: fullpath,
@@ -157,6 +166,8 @@ func (fs *FilerServer) UpdateEntry(ctx context.Context, req *filer_pb.UpdateEntr
 		newEntry.Attr.Uid = req.Entry.Attributes.Uid
 		newEntry.Attr.Gid = req.Entry.Attributes.Gid
 		newEntry.Attr.Mime = req.Entry.Attributes.Mime
+		newEntry.Attr.UserName = req.Entry.Attributes.UserName
+		newEntry.Attr.GroupNames = req.Entry.Attributes.GroupName
 
 	}
 
@@ -164,7 +175,7 @@ func (fs *FilerServer) UpdateEntry(ctx context.Context, req *filer_pb.UpdateEntr
 		return &filer_pb.UpdateEntryResponse{}, err
 	}
 
-	if err = fs.filer.UpdateEntry(newEntry); err == nil {
+	if err = fs.filer.UpdateEntry(entry, newEntry); err == nil {
 		fs.filer.DeleteChunks(unusedChunks)
 		fs.filer.DeleteChunks(garbages)
 	}
@@ -232,4 +243,24 @@ func (fs *FilerServer) DeleteCollection(ctx context.Context, req *filer_pb.Delet
 	}
 
 	return &filer_pb.DeleteCollectionResponse{}, err
+}
+
+func (fs *FilerServer) Statistics(ctx context.Context, req *filer_pb.StatisticsRequest) (resp *filer_pb.StatisticsResponse, err error) {
+
+	input := &master_pb.StatisticsRequest{
+		Replication: req.Replication,
+		Collection:  req.Collection,
+		Ttl:         req.Ttl,
+	}
+
+	output, err := operation.Statistics(fs.filer.GetMaster(), input)
+	if err != nil {
+		return nil, err
+	}
+
+	return &filer_pb.StatisticsResponse{
+		TotalSize: output.TotalSize,
+		UsedSize:  output.UsedSize,
+		FileCount: output.FileCount,
+	}, nil
 }
