@@ -61,14 +61,14 @@ var cmdMount = &Command{
 
 func parseFilerGrpcAddress(filer string, optionalGrpcPort int) (filerGrpcAddress string, err error) {
 //default value 
-	var filerGrpcPort int64
+	var filerGrpcPort int
 	var filerGrpcHost string
 // if set the filer.grpc.port ,we will not split the port from the filer option
 	if optionalGrpcPort != 0 {
 		filerGrpcPort = optionalGrpcPort
 		filerGrpcHost=filer
-	}
-	else{
+	}else{
+
 		hostnameAndPort := strings.Split(filer, ":")
 		if len(hostnameAndPort) != 2 {
 			return "", fmt.Errorf("The filer should have hostname:port format: %v when not specified the filer.grpc.port ", hostnameAndPort)
@@ -79,7 +79,7 @@ func parseFilerGrpcAddress(filer string, optionalGrpcPort int) (filerGrpcAddress
 			return "", fmt.Errorf("The filer filer port parse error: %v", parseErr)
 		}
 
-		filerGrpcPort := int(filerPort) + 10000
+		filerGrpcPort = int(filerPort) + 10000
 		filerGrpcHost=hostnameAndPort[0]
 	}
 
